@@ -95,10 +95,10 @@ class madPdo extends PDO {
         $regex = '('; # begin group
         $regex .= '(?:--|\\#)[\\ \\t\\S]*'; # inline comments
         $regex .= '|(?:<>|<=>|>=|<=|==|=|!=|!|<<|>>|<|>|\\|\\||\\||&&|&|-|\\+|\\*(?!\/)|\/(?!\\*)|\\%|~|\\^|\\?)'; # logical operators
-        $regex .= '|[\\[\\]\\(\\),;`]|\\\'\\\'(?!\\\')|\\"\\"(?!\\"")'; # empty single/double quotes
+        $regex .= '|[\\[\\]\\(\\),;]|\\\'\\\'(?!\\\')|\\"\\"(?!\\"")'; # empty single/double quotes
         $regex .= '|".*?(?:(?:""){1,}"|(?<!["\\\\])"(?!")|\\\\"{2})|\'.*?(?:(?:\'\'){1,}\'|(?<![\'\\\\])\'(?!\')|\\\\\'{2})'; # quoted strings
         $regex .= '|\/\\*[\\ \\t\\n\\S]*?\\*\/'; # c style comments
-        $regex .= '|(?:[\\w:@]+(?:\\.(?:\\w+|\\*)?)*)'; # words, placeholders, database.table.column strings
+        $regex .= '|(?:`?[\\w:@]+`?(?:\\.(?:`?\\w+`?|\\*)?)*)'; # words, placeholders, database.table.column strings
         $regex .= '|[\t\ ]+';
         $regex .= '|[\.]'; #period
         $regex .= '|[\s]'; #whitespace
@@ -112,15 +112,14 @@ class madPdo extends PDO {
         return $result[0];
    
     }
-
     public function rewriteSelect($sql,$cleanWhitespace = true) {
         // copy and cut the query
         $tokens = $this->tokenize( $sql, $cleanWhitespace );
        
-        $newTokens = array();
         $join = array();
         $backticks = '';
-
+        $selectAll = false;
+        
         // rewrite columns
         foreach ( $tokens as $key => $token ) {
             if ( in_array( $token, $this->querysections ) ) {
@@ -132,54 +131,76 @@ class madPdo extends PDO {
                 continue;
             }
 
+            if ( $querySection == 'select' && $token == '*' ) {
+                // figure the table, rewrite the *
+                foreach( $tokens as $subKey => $subToken ) {
+                    if ( in_array( $subToken, $this->querysections ) ) {
+                        $querySection = $subToken;
+                    }
+
+                    if ( $querySection != 'from' ) {
+                        continue;
+                    }
+
+                    if ( !in_array( $subToken, array_keys( $this->schemalessTables ) ) ) {
+                        continue;
+                    }
+
+                    $tokens[$key] = '`' . implode( '`, `', $this->schemalessTables[$subToken] ) . '`';
+                    return $this->rewriteSelect( implode( '', $tokens ) );
+                }
+            }
+
             foreach( $this->schemalessTables as $schemalessTable => $columns ) {
+
+                if ( preg_match( "/`?$schemalessTable`?\\.\\*/", $token ) ) {
+                    $selects = array(  );
+                    foreach( $columns as $column ) {
+                        $selects[] = "`{$schemalessTable}_{$column}`.value AS `$column`";
+
+                        if ( !isset( $join[$schemalessTable] ) ) {
+                            $join[$schemalessTable] = array(  );
+                        }
+
+                        if ( !in_array( $column, $join[$schemalessTable] ) ) {
+                            $join[$schemalessTable][] = $column;
+                        }
+                    }
+                    
+                    $tokens[$key] = implode( ', ', $selects );
+
+                    continue;
+                }
+
                 foreach( $columns as $column ) {
                     $rewrite = false;
 
-                    if ( $token == $column ) {
+                    if ( in_array( $token, array( $column, "`$column`" ) ) ) {
                         $rewrite = true;
                     }
 
-                    if ( $token == "$schemalessTable.$column" ) {
+                    if ( preg_match( "/`?$schemalessTable`?\\.`?$column`?/", $token ) ) {
                         $rewrite = true;
                     }
 
                     if ( $rewrite ) {
-                        $tokens[$key] = "{$schemalessTable}_{$column}.value";
+                        $backticks = strpos( $token, '`' ) === false ? '' : '`';
+                        $tokens[$key] = "{$backticks}{$schemalessTable}_{$column}{$backticks}.{$backticks}value{$backticks}";
 
                         if ( $querySection == 'select' ) {
-                            // need backticks?
-                            if ( $tokens[$key-1] == '`' ) {
-                                $backticks = '`';
-                            }
+                            $alias = $column;
 
-                            // is AS already set in the originnal query?
-                            $nextTokenKey = $key + 1;
-                            
-                            if ( $tokens[$nextTokenKey] == '`' ) {
-                                $nextTokenKey++;
-                            }
-
-                            // next is whitespace
-                            $nextTokenKey++;
-                            
+                            // possible next tokens: ' ', 'AS'
+                            $nextTokenKey = $key + 2;
                             if ( strtolower( $tokens[$nextTokenKey] ) == 'as' ) {
-                                // remove AS token
                                 $tokens[$nextTokenKey] = '';
-                                // next token is a whitespace
-                                $nextTokenKey++;
-                                // remove the whitespace token
+                                $nextTokenKey += 2;
+                                $alias = $tokens[$nextTokenKey];
                                 $tokens[$nextTokenKey] = '';
-                                // next token is the actual alias
-                                $nextTokenKey++;
-                                // use the originnal alias
-                                $tokens[$key] .= "$backticks AS $backticks{$tokens[$nextTokenKey]}";
-                                // remove the original alias token
-                                $tokens[$nextTokenKey] = '';
-                            } else {
-                                $tokens[$key] .= "$backticks AS {$backticks}{$column}";
                             }
-                            
+
+
+                            $tokens[$key] .= " AS {$backticks}{$alias}{$backticks}";
                             $backticks = '';
                         }
 
@@ -187,7 +208,9 @@ class madPdo extends PDO {
                             $join[$schemalessTable] = array(  );
                         }
 
-                        $join[$schemalessTable][] = $column;
+                        if ( !in_array( $column, $join[$schemalessTable] ) ) {
+                            $join[$schemalessTable][] = $column;
+                        }
                     }
                 }
             }
@@ -200,7 +223,7 @@ class madPdo extends PDO {
             }
 
             if ( $querySection == 'from' ) {
-                if ( in_array( $token, array_keys( $this->schemalessTables ) ) ) {
+                if ( in_array( $token, array_keys( $join ) ) ) {
                     foreach( $join[$token] as $column ) {
                         $tokens[$key] .= " LEFT OUTER JOIN {$token}_{$column} ON {$token}_{$column}.id = $token.id";
                     }
@@ -349,12 +372,12 @@ $pdo->prepare( 'insert into authors set name = :name' )
 ) );
 
 echo "Selecting 2 posts body order by title\n";
-$select = $pdo->prepare( 'select title, body from posts order by title limit 0, 2' );
+$select = $pdo->prepare( 'select * from posts order by title limit 0, 2' );
 $select->execute(  );
 var_dump( $select->fetchAll(  ) );
 
 echo "Selecting 2 posts body order by title with authors \n";
-$select = $pdo->prepare( 'select posts.title, posts.body, authors.name from posts left join authors on authors.id = posts.author order by title limit 0, 2' );
+$select = $pdo->prepare( 'select `posts`.title, authors.* from posts LEFT JOIN authors ON authors.id = posts.author order by title limit 0, 2' );
 $select->execute(  );
 var_dump( $select->fetchAll(  ) );
 
