@@ -20,9 +20,9 @@ class madPdo extends PDO {
         parent::__construct( $name_host, $username, $password, $driverOptions );
         $this->setAttribute( PDO::ATTR_STATEMENT_CLASS, array( 'madPDOStatement' ) );
         
-#        if ( $cache = apc_fetch( 'mad schmaless tables' ) ) {
-#            $this->schemalessTables = $cache;
-#        } else {
+        if ( function_exists( 'apc_fetch' ) && $cache = apc_fetch( 'mad schmaless tables' ) ) {
+            $this->schemalessTables = $cache;
+        } else {
             $tables = parent::query('show tables', PDO::FETCH_COLUMN, 0)->fetchAll();
 
             // find index tables
@@ -46,21 +46,28 @@ class madPdo extends PDO {
                     }
                 }
             }
-#        }
+        }
     }
-
+    public function __destruct(  ) {
+        if ( function_exists( 'apc_store' ) ) {
+            apc_store( 'mad schemaless tables', $this->schemalessTables );
+        }
+    }
     public function prepare( $statement, array $driver_options = array() ) {
         if ( preg_match( '/insert( into)? `?([^.]+\.)?(?P<table>[^\s`]+)`? set/i', $statement, $matches ) ) {
             return $this->prepareInsertSet( $statement, $matches['table'] );
         } elseif ( strtolower( substr( trim( $statement ), 0, 6 ) ) == 'select' ) {
             $key = $statement;
-            $cachedStatement = apc_fetch( $key );
+            $cachedStatement = function_exists( 'apc_fetch' ) ? apc_fetch( $key ) : null;
 
             if ( $cachedStatement ) {
                 $statement = $cachedStatement;
             } else {
                 $statement = $this->rewriteSelect( $statement );
-                apc_store( $key, $statement );
+
+                if ( function_exists( 'apc_store' ) ) {
+                    apc_store( $key, $statement );
+                }
             }
             
             $return = parent::prepare( $statement );
@@ -280,7 +287,6 @@ class madPdo extends PDO {
 
         if ( !isset( $this->schemalessTables[$table] ) ) {
             $createStatement = parent::prepare( "CREATE TABLE $table (id INT(12) PRIMARY KEY AUTO_INCREMENT) ENGINE=InnoDb" );
-            var_dump( "CREATE $table",$this->schemalessTables );
             $createStatement->createTable = $table;
             $statement->objects[] = $createStatement;
             unset( $createStatement );
@@ -328,8 +334,6 @@ class madPDOStatementWrapper {
 
     public function execute( $input_parameters = array(  ) ) {
         $success = true;
-
-        var_dump( "NEW", $this->schemalessTables, $this->objects );
 
         foreach( $this->objects as $object ) {
             if ( $object->insertAttribute && in_array( $object->insertAttribute, $input_parameters ) ) {

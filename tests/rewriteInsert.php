@@ -48,7 +48,7 @@ class madPDORewriteInsertTest extends madPDOTestCase {
      * @dataProvider insertProvider
      */
     public function testInsert( $insert, $data, $expected = null ) {
-        $objects = $this->pdo->prepare( $insert );
+        $objects = self::$pdo->prepare( $insert );
 
         $result = array(  );
         foreach( $objects->objects as $statement ) {

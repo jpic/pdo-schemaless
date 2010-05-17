@@ -1,7 +1,6 @@
 <?php
 
-class madPDORecipeTest extends PHPUnit_Framework_TestCase {
-
+class madPDOM2MTest extends madPDOTestCase {
     static public $initial = '
 insert into recipes set title = "mojito", author = 1;
 insert into recipes set title = "tipunch", author = 2;
@@ -19,24 +18,6 @@ insert into recipe_categories set recipe = 2, category = 1;
 insert into recipe_categories set recipe = 3, category = 2;
 insert into recipe_categories set recipe = 4, category = 2;
 ';
-
-    static public $pdo;
-
-    static public function setUpBeforeClass() {
-        self::$pdo = new madPDO( 'mysql:dbname=testdb;host=localhost', 'root' );
-        self::$pdo->setAttribute( PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );
-
-        foreach( explode( ";", self::$initial ) as $sql ) {
-            $sql = trim( $sql );
-
-            if ( !$sql ) {
-                continue;
-            }
-            
-            self::$pdo->prepare( $sql )->execute(  );
-        }
-    }
-
     static public function selectProvider(  ) {
         return array(
             array( '
@@ -182,20 +163,7 @@ group by recipe_categories.id
      * @dataProvider selectProvider
      */
     public function testSelect( $sql, $expected = null ) {
-        $select = self::$pdo->prepare( $sql );
-        var_dump( $select );
-        $select->setFetchMode( PDO::FETCH_ASSOC );
-        $select->execute();
-
-        $result = $select->fetchAll(  );
-
-        if ( is_null( $expected ) ) {
-            var_export( $result );
-            $this->markTestSkipped(  );
-            return true;
-        }
-
-        $this->assertEquals( $expected, $result );
+        parent::testSelect( $sql, $expected );
     }
 }
 

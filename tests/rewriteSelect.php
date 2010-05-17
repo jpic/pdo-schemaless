@@ -3,12 +3,6 @@
 require_once 'case.php';
 
 class madPDORewriteSelectTest extends madPDOTestCase {
-    public $pdo;
-
-    public function setUp(  ) {
-        $this->pdo = new madPDO( 'mysql:dbname=testdb;host=localhost', 'root' );
-    }
-
     static public function rewriteSelectProvider(  ) {
         return array(
             array(
@@ -71,7 +65,7 @@ class madPDORewriteSelectTest extends madPDOTestCase {
      */
     public function testRewriteSelect( $fixture, $expected ) {
         return true;
-        $result = $this->pdo->rewriteSelect( $fixture );
+        $result = self::$pdo->rewriteSelect( $fixture );
         $this->assertEquals( $expected, $result );
     }
 }
