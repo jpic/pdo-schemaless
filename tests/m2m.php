@@ -132,7 +132,7 @@ from
     recipe_categories
     left join recipes on recipe_categories.recipe = recipes.id
     left join categories on recipe_categories.category = categories.id
-    left join authors on recipes.author = recipes.id
+    left join authors on recipes.author = authors.id
 where
     categories.title like "dri%"
 group by recipe_categories.id
@@ -150,7 +150,7 @@ group by recipe_categories.id
                   array (
                     'recipe_title' => 'tipunch',
                     'category_title' => 'drinks',
-                    'author_name' => 'james',
+                    'author_name' => 'christophe',
                     'recipe' => '2',
                     'category' => '1',
                   ),
