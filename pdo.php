@@ -20,9 +20,9 @@ class madPdo extends PDO {
         parent::__construct( $name_host, $username, $password, $driverOptions );
         $this->setAttribute( PDO::ATTR_STATEMENT_CLASS, array( 'madPDOStatement' ) );
         
-        if ( $cache = apc_fetch( 'mad schmaless tables' ) ) {
-            $this->schemalessTables = $cache;
-        } else {
+#        if ( $cache = apc_fetch( 'mad schmaless tables' ) ) {
+#            $this->schemalessTables = $cache;
+#        } else {
             $tables = parent::query('show tables', PDO::FETCH_COLUMN, 0)->fetchAll();
 
             // find index tables
@@ -46,13 +46,13 @@ class madPdo extends PDO {
                     }
                 }
             }
-        }
+#        }
     }
 
     public function prepare( $statement, array $driver_options = array() ) {
         if ( preg_match( '/insert( into)? `?([^.]+\.)?(?P<table>[^\s`]+)`? set/i', $statement, $matches ) ) {
             return $this->prepareInsertSet( $statement, $matches['table'] );
-        } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'select' ) {
+        } elseif ( strtolower( substr( trim( $statement ), 0, 6 ) ) == 'select' ) {
             $key = $statement;
             $cachedStatement = apc_fetch( $key );
 
@@ -62,14 +62,23 @@ class madPdo extends PDO {
                 $statement = $this->rewriteSelect( $statement );
                 apc_store( $key, $statement );
             }
-            var_dump( $statement );
             
-            return parent::prepare( $statement );
+            $return = parent::prepare( $statement );
+            
+            if ( !$return ) {
+                $info = $this->errorInfo(  );
+                trigger_error( "Failed:\n$statement\nReason:\n$info" );
+                mysql_shell(  );
+            }
+            
+            return $return;
         } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'delete' ) {
         
         } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'update' ) {
 
         }
+
+        die( "Failed for " . strtolower( substr( $statement, 0, 6 ) ) );
     }
 
     /**
@@ -199,8 +208,12 @@ class madPdo extends PDO {
                                 $tokens[$nextTokenKey] = '';
                             }
 
+                            if ( $backticks && strpos( $alias, '`' ) !== false ) {
+                                $tokens[$key] .= " AS {$alias}";
+                            } else {
+                                $tokens[$key] .= " AS {$backticks}{$alias}{$backticks}";
+                            }
 
-                            $tokens[$key] .= " AS {$backticks}{$alias}{$backticks}";
                             $backticks = '';
                         }
 
@@ -235,7 +248,7 @@ class madPdo extends PDO {
     }
 
     public function prepareInsertSet( $sql, $table, $cleanWhitespace = true ) {
-        $statement = new madPDOStatementWrapper( $this );
+        $statement = new madPDOStatementWrapper( &$this->schemalessTables, $this );
         
         // copy and cut the query
         $tokens = $this->tokenize( $sql, $cleanWhitespace );
@@ -250,38 +263,46 @@ class madPdo extends PDO {
             }
 
             $previousTokenKey = $key - 1;
-            while ( in_array( $tokens[$previousTokenKey], array( '`', ' ' ) ) ) {
+            while ( $tokens[$previousTokenKey] == ' ' ) {
                 $previousTokenKey--;
             }
 
             $nextTokenKey = $key + 1;
-            while ( in_array( $tokens[$nextTokenKey], array( '`', ' ' ) ) ) {
+            while ( $tokens[$nextTokenKey] == ' ' ) {
                 $nextTokenKey++;
             }
 
-            $data[$tokens[$previousTokenKey]] = $tokens[$nextTokenKey];
+            $key = substr( $tokens[$previousTokenKey], 0, 1 ) == '`' ? substr( $tokens[$previousTokenKey], 1, -1 ) : $tokens[$previousTokenKey];
+            $value = substr( $tokens[$nextTokenKey], 0, 1 ) == '`' ? substr( $tokens[$nextTokenKey], 1, -1 ) : $tokens[$nextTokenKey];
+
+            $data[$key] = $value;
         }
 
         if ( !isset( $this->schemalessTables[$table] ) ) {
             $createStatement = parent::prepare( "CREATE TABLE $table (id INT(12) PRIMARY KEY AUTO_INCREMENT) ENGINE=InnoDb" );
+            var_dump( "CREATE $table",$this->schemalessTables );
             $createStatement->createTable = $table;
             $statement->objects[] = $createStatement;
+            unset( $createStatement );
         }
    
         $insertStatement = parent::prepare( "INSERT INTO $table VALUES()" );
         $insertStatement->insertsSchemalessRow = true;
         $statement->objects[] = $insertStatement;
+        unset( $insertStatement );
 
         foreach( $data as $column => $value ) {
-            if ( !isset( $this->schemalessTables[$table] ) || !in_array( $table, $this->schemalessTables[$table] ) ) {
+            if ( !isset( $this->schemalessTables[$table] ) || !in_array( $column, $this->schemalessTables[$table] ) ) {
                 $createStatement = parent::prepare( "CREATE TABLE {$table}_{$column} (id INT(12), value TEXT, UNIQUE(id)) ENGINE=InnoDb" );
                 $createStatement->createColumn = array( $table, $column );
                 $statement->objects[] = $createStatement;
+                unset( $createStatement );
             }
 
             $insertStatement = parent::prepare( "INSERT INTO {$table}_{$column} VALUES( :id, $value ) ON DUPLICATE KEY UPDATE value = $value" );
             $insertStatement->insertAttribute = $column;
             $statement->objects[] = $insertStatement;
+            unset( $insertStatement );
         }
 
         return $statement;
@@ -297,17 +318,21 @@ class madPDOStatement extends PDOStatement {
 
 class madPDOStatementWrapper {
     public $objects = array();
+    public $schemalessTables = null;
     public $pdo = null;
 
-    public function __construct( $pdo ) {
+    public function __construct( &$schemalessTables, $pdo ) {
+        $this->schemalessTables =& $schemalessTables;
         $this->pdo = $pdo;
     }
 
     public function execute( $input_parameters = array(  ) ) {
         $success = true;
 
+        var_dump( "NEW", $this->schemalessTables, $this->objects );
+
         foreach( $this->objects as $object ) {
-            if ( $object->insertAttribute ) {
+            if ( $object->insertAttribute && in_array( $object->insertAttribute, $input_parameters ) ) {
                 // work around: Invalid parameter number: number of bound 
                 // variables does not match number of tokens
                 $result = $object->execute( array(
@@ -326,12 +351,12 @@ class madPDOStatementWrapper {
                 $input_parameters['id'] = $this->pdo->lastInsertId(  );
             }
 
-            if ( $object->createTable && !in_array( $object->createTable, $this->pdo->schemalessTables ) ) {
-                $this->pdo->schemalessTables[$object->createTable] = array();
+            if ( $object->createTable && !isset( $this->schemalessTables[$object->createTable] ) ) {
+                $this->schemalessTables[$object->createTable] = array();
             }
-    
-            if ( $object->createColumn && !in_array( $object->createColumn[1], $this->pdo->schemalessTables[$object->createColumn[0]] ) ) {
-                $this->pdo->schemalessTables[$object->createColumn[0]][] = $object->createColumn[1];
+   
+            if ( $object->createColumn && !in_array( $object->createColumn[1], $this->schemalessTables[$object->createColumn[0]] ) ) {
+                $this->schemalessTables[$object->createColumn[0]][] = $object->createColumn[1];
             }
         }
 
@@ -345,51 +370,27 @@ class madPDOStatementWrapper {
     }
 }
 
-$pdo = new madPDO( 'mysql:dbname=testdb;host=localhost', 'root' );
 
-$pdo->prepare( 'insert into posts set title = :title, body = :body, author = :author' )
-    ->execute( array( 
-        'title'  => 'Poor man schemaless with MySQL', 
-        'body'   => 'See mom, no structure!',
-        'author' => 1,
-) );
+function mysql_shell(  ) {
+    $prompt = 'mysql-> ';
+    $query = '';
 
-$pdo->prepare( 'insert into posts set title = :title, body = :body, author = :author' )
-    ->execute( array( 
-        'title'  => 'Re: Poor man schemaless with MySQL', 
-        'body'   => 'You idiot!',
-        'author' => 2,
-) );
+    while ( $line = readline( $prompt ) ) {
+        if ( $query ) {
+            $prompt = '->';
+        }
 
-$pdo->prepare( 'insert into authors set name = :name' )
-    ->execute( array( 
-        'name' => 'kiddo',
-) );
+        $query .= $line;
 
-$pdo->prepare( 'insert into authors set name = :name' )
-    ->execute( array( 
-        'name' => 'dad',
-) );
+        if ( substr( $line, -1 ) == ';' ) {
+            echo shell_exec( sprintf( 
+                'echo "%s" | mysql testdb',
+                str_replace( '"', '\"', $query )
+            ) );
+            $prompt = 'mysql->';
+            $query = '';
+        }
+    }
+}
 
-echo "Selecting 2 posts body order by title\n";
-$select = $pdo->prepare( 'select * from posts order by title limit 0, 2' );
-$select->execute(  );
-var_dump( $select->fetchAll(  ) );
-
-echo "Selecting 2 posts body order by title with authors \n";
-$select = $pdo->prepare( 'select `posts`.title, authors.* from posts LEFT JOIN authors ON authors.id = posts.author order by title limit 0, 2' );
-$select->execute(  );
-var_dump( $select->fetchAll(  ) );
-
-echo "Selecting posts with authors\n";
-//$select = $pdo->prepare( 'select `authors`.`name` as author_name, `posts`.`title`, posts.body from posts left join authors on authors.id = posts.id' );
-//$select->execute(  );
-//var_dump( $select->fetchAll(  ) );
-//var_dump( $pdo->prepare( 'select title, body from posts' )->execute()->fetchAll() );
-
-//echo "Deleting posts by dad\n";
-//$pdo->prepare( 'delete from posts where author = :author' )->rewrite( true )->execute( array( 'author' => 'dad' ) );
-
-//echo "Selecting all authors\n";
-//var_dump( $pdo->prepare( 'select author, body from posts' )->rewrite( true )->execute()->fetchAll() );
 ?>
