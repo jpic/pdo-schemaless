@@ -8,6 +8,10 @@ Get the repo with:
 
     git clone http://github.com/jpic/pdo-schemaless.git
 
+Or:
+
+    http://github.com/jpic/pdo-schemaless/zipball/master
+
 Then include:
 
     pdo-schemaless/pdo.php
@@ -18,45 +22,45 @@ Then instanciate madPDO, ie:
 
 Now MySQL forgot it needed schemas.
 
+If you want an SQL shell to spawn when a query fails, use:
+    
+    $pdo = new madPDOFramework( 'mysql:dbname=testdb;host=localhost', 'root' );
+
 ## Testing madPDO
 
-Test code needs PHPUnit 3.5 (sorry) and PHP 5.3.2 (sorry).
+2 databases are needed, one for vanilla PDO and one for madPDO.
 
-### Installing PHP 5.3.2 for testing
+Open test.php and setup the database access settings for $madPdo and $vanillaPdo.
 
-Install PHP from sources (sorry).
-Install APC from sources (sorry).
-Install XDebug >= 2.0.5 from sources (sorry).
+Run "test.php" in the "tests/" subfolder.
 
-If using the new mysqlnd driver, don't forget to add to your mysql init script something like:
+### How tests work
 
-    # sorry, that is broken as well
-    ln -sfn /var/run/mysqld/mysqld.sock /tmp/mysql.sock
+Each folder inside the "tests/fixtures" directory is a test. Both databases are
+cleared before each test.
 
-### Installing PHPUnit 3.5
+"insert.sql" is run with both vanilla pdo and mad pdo, as many times as
+$insertIterations is set to.
 
-Sorry, this needs PHPUnt 3.5 (sorry), install with this bash commands:
+"schema.sql" is generated from the structure of mad, with create statements for
+a vanilla database. If it exists, it is generated again and it is asserted that
+there is no difference with the old one.
 
-    cd /usr/src
-    
-    git clone http://github.com/sebastianbergmann/phpunit.git
-    git clone http://github.com/sebastianbergmann/php-code-coverage.git
-    git clone http://github.com/sebastianbergmann/php-file-iterator.git
-    git clone http://github.com/sebastianbergmann/php-text-template.git
-    git clone http://github.com/sebastianbergmann/php-token-stream.git
-    git clone http://github.com/sebastianbergmann/php-timer.git
-    
-    cd /usr/bin
-    ln -sfn /usr/src/phpunit/phpunit.php phpunit
+"data.sql" is generated from the data in the mad database. If it exists,
+regressions are checked like for schema.sql.
 
-Add to php.ini:
+"select.sql" is run in both vanilla and mad databases, as many times as
+$testIterations is set. It is asserted that the result of each select statement
+is the same in vanilla database and in mad database. Additionnaly, performances
+are calculated.
 
-    include_path = ".:/usr/share/php5:/usr/share/php:/usr/src/phpunit:/usr/src/php-code-coverage:/usr/src/php-file-iterator:/usr/src/php-text-template:/usr/src/php-token-stream:/usr/src/php-timer"
+### Testing a query
 
-If lucky, and not yet exhausted, run the test suite:
+Create a folder in "test/fixtures".
 
-    cd pdo-schemaless/tests
-    phpunit suite.php
+In "insert.sql", add as many insert statements as you need.
+
+In "select.sql", add as many select statements to test.
 
 ## Credits
 
