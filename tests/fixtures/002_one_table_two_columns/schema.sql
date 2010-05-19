@@ -1,0 +1,1 @@
+CREATE TABLE `authors` ( id INT(12) PRIMARY KEY AUTO_INCREMENT, name TEXT, email TEXT ) Engine=InnoDb;

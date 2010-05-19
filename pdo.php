@@ -15,77 +15,108 @@ class madPdo extends PDO {
     public $query = '';
 
     public $schemalessTables = array(  );
+    public $idSignature = 'INT(12) PRIMARY KEY AUTO_INCREMENT';
+    public $autoId = true;
+    public $dbName = '';
+    public $queryCache = array(  );
 
     public function __construct( $name_host, $username='', $password='', $driverOptions=array() ) {
+        if ( isset( $driverOptions['autoId'] ) ) {
+            $this->autoId = $driverOptions['autoId'];
+            unset( $driverOptions['autoId'] );
+        }
+
+        if ( isset( $driverOptions['idSignature'] ) ) {
+            $this->idSignature = $driverOptions['idSignature'];
+            unset( $driverOptions['idSignature'] );
+        }
+
+        if ( preg_match( '/dbname=(?P<dbname>[^;]+)/', $name_host, $matches ) ) {
+            $this->dbName = $matches['dbname'];
+        }
+
         parent::__construct( $name_host, $username, $password, $driverOptions );
         $this->setAttribute( PDO::ATTR_STATEMENT_CLASS, array( 'madPDOStatement' ) );
         
         if ( function_exists( 'apc_fetch' ) && $cache = apc_fetch( 'mad schmaless tables' ) ) {
             $this->schemalessTables = $cache;
         } else {
-            $tables = parent::query('show tables', PDO::FETCH_COLUMN, 0)->fetchAll();
+            $this->cacheReset(  );
+        }
 
-            // find index tables
-            foreach( $tables as $table ) {
-                $fields = parent::query( "describe $table" )->fetchAll(  );
+        if ( function_exists( 'apc_fetch' ) && $cache = apc_fetch( 'mad query cache' ) ) {
+            $this->queryCache = $cache;
+        }
+    }
 
-                if ( count( $fields ) == 1 && $fields[0]['Field'] == 'id' ) {
-                    $this->schemalessTables[$table] = array();
-                }
+    public function cacheReset(  ) {
+        $this->queryCache = array(  );
+
+        $tables = parent::query('show tables', PDO::FETCH_COLUMN, 0)->fetchAll();
+
+        // find index tables
+        foreach( $tables as $table ) {
+            $fields = parent::query( "describe $table" )->fetchAll(  );
+
+            if ( count( $fields ) == 1 && $fields[0]['Field'] == 'id' ) {
+                $this->schemalessTables[$table] = array();
             }
-            
-            // find attribute tables
-            foreach( $tables as $table ) {
-                $fields = parent::query( "describe $table" )->fetchAll(  );
+        }
+        
+        // find attribute tables
+        foreach( $tables as $table ) {
+            $fields = parent::query( "describe $table" )->fetchAll(  );
 
-                if ( count( $fields ) == 2 && $fields[0]['Field'] == 'id' && $fields[1]['Field'] == 'value' ) {
-                    foreach( array_keys( $this->schemalessTables ) as $schemalessTable ) {
-                        if ( substr( $table, 0, strlen( $schemalessTable ) ) == $schemalessTable ) {
-                            $this->schemalessTables[$schemalessTable][] = substr( $table, strlen( $schemalessTable ) + 1 );
-                        }
+            if ( count( $fields ) == 2 && $fields[0]['Field'] == 'id' && $fields[1]['Field'] == 'value' ) {
+                foreach( array_keys( $this->schemalessTables ) as $schemalessTable ) {
+                    if ( substr( $table, 0, strlen( $schemalessTable ) ) == $schemalessTable ) {
+                        $this->schemalessTables[$schemalessTable][] = substr( $table, strlen( $schemalessTable ) + 1 );
                     }
                 }
             }
         }
     }
+
     public function __destruct(  ) {
         if ( function_exists( 'apc_store' ) ) {
             apc_store( 'mad schemaless tables', $this->schemalessTables );
+            apc_store( 'mad query cache', $this->queryCache );
         }
     }
-    public function prepare( $statement, array $driver_options = array() ) {
-        if ( preg_match( '/insert( into)? `?([^.]+\.)?(?P<table>[^\s`]+)`? set/i', $statement, $matches ) ) {
-            return $this->prepareInsertSet( $statement, $matches['table'] );
-        } elseif ( strtolower( substr( trim( $statement ), 0, 6 ) ) == 'select' ) {
-            $key = $statement;
-            $cachedStatement = function_exists( 'apc_fetch' ) ? apc_fetch( $key ) : null;
+    public function prepare(  ) {
+        $args = func_get_args(  );
+        $statement = $args[0];
+        $driverOptions = isset( $args[1] ) ? $args[1] : array(  );
 
-            if ( $cachedStatement ) {
-                $statement = $cachedStatement;
-            } else {
-                $statement = $this->rewriteSelect( $statement );
+         if ( preg_match( '/insert( into)? `?([^.]+\.)?(?P<table>[^\s`]+)`? set/i', $statement, $matches ) ) {
+             $return = $this->prepareInsertSet( $statement, $matches['table'] );
+         } elseif ( strtolower( substr( trim( $statement ), 0, 6 ) ) == 'select' ) {
+             $key = $statement;
+             $cachedStatement = isset( $this->queryCache[$key] ) ? $this->queryCache[$key] : null;
+ 
+             if ( $cachedStatement ) {
+                 $statement = $cachedStatement;
+             } else {
+                 $statement = $this->rewriteSelect( $statement );
+                 $this->queryCache[$key] = $statement;
+             }
+             
+             $return = parent::prepare( $statement );
+         } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'delete' ) {
+         
+         } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'update' ) {
+ 
+         } else {
+             $return = parent::prepare( $statement );
+         }
 
-                if ( function_exists( 'apc_store' ) ) {
-                    apc_store( $key, $statement );
-                }
-            }
-            
-            $return = parent::prepare( $statement );
-            
-            if ( !$return ) {
-                $info = $this->errorInfo(  );
-                trigger_error( "Failed:\n$statement\nReason:\n$info" );
-                mysql_shell(  );
-            }
-            
-            return $return;
-        } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'delete' ) {
-        
-        } elseif ( strtolower( substr( $statement, 0, 6 ) ) == 'update' ) {
-
+        if ( !$return ) {
+            $info = $this->errorInfo(  );
+            trigger_error( "Failed:\n$statement\nReason:\n$info", E_USER_ERROR );
+            mysql_shell(  );
         }
 
-        die( "Failed for " . strtolower( substr( $statement, 0, 6 ) ) );
+        return $return;
     }
 
     /**
@@ -135,10 +166,11 @@ class madPdo extends PDO {
         $join = array();
         $backticks = '';
         $selectAll = false;
+        $querySection = '';
         
         // rewrite columns
         foreach ( $tokens as $key => $token ) {
-            if ( in_array( $token, $this->querysections ) ) {
+            if ( in_array( strtolower( $token ), $this->querysections ) ) {
                 $querySection = $token;
             }
 
@@ -162,7 +194,7 @@ class madPdo extends PDO {
                         continue;
                     }
 
-                    $tokens[$key] = '`' . implode( '`, `', $this->schemalessTables[$subToken] ) . '`';
+                    $tokens[$key] = '`'. $subToken . '`.*';
                     return $this->rewriteSelect( implode( '', $tokens ) );
                 }
             }
@@ -170,7 +202,9 @@ class madPdo extends PDO {
             foreach( $this->schemalessTables as $schemalessTable => $columns ) {
 
                 if ( preg_match( "/`?$schemalessTable`?\\.\\*/", $token ) ) {
-                    $selects = array(  );
+                    $selects = array(
+                        "`$schemalessTable`.`id`",
+                    );
                     foreach( $columns as $column ) {
                         $selects[] = "`{$schemalessTable}_{$column}`.value AS `$column`";
 
@@ -184,7 +218,6 @@ class madPdo extends PDO {
                     }
                     
                     $tokens[$key] = implode( ', ', $selects );
-
                     continue;
                 }
 
@@ -313,13 +346,193 @@ class madPdo extends PDO {
 
         return $statement;
     }
+    public function query(  ) {
+        $args = func_get_args(  );
+        
+        $statement = $this->prepare( $args[0] );
+
+        switch ( count( $args ) ) {
+            case 2:
+                $statement->setFetchMode( $args[1] );
+                break;
+            case 3:
+                $statement->setFetchMode( $args[1], $args[2] );
+                break;
+        }
+
+        $statement->execute(  );
+        return $statement;
+    }
 }
 
+class madPDOFramework extends madPDO {
+    public $noShell = false;
+
+    public function query(  ) {
+        $args = func_get_args(  );
+        try {
+            switch ( count( $args ) ) {
+                case 1:
+                    return parent::query( $args[0] );
+                case 2:
+                    return parent::query( $args[0], $args[1] );
+                case 3:
+                    return parent::query( $args[0], $args[1], $args[2] );
+            }
+        } catch( PDOException $e ) {
+            $this->shell( $e->s->queryString );
+        }
+    }
+
+    public function prepare(  ) {
+        $args = func_get_args(  );
+        try {
+            switch ( count( $args ) ) {
+                case 1:
+                    return parent::prepare( $args[0] );
+                case 2:
+                    return parent::prepare( $args[0], $args[1] );
+            }
+        } catch( PDOException $e ) {
+            $this->shell( $e->s->queryString );
+        }
+    }
+    public function shell( $initial ) {
+        if ( $this->noShell ) {
+            return;
+        }
+
+        switch( php_sapi_name(  ) ) {
+            case 'cli':
+                $this->shellCli( $initial );
+                break;
+            default:
+                $this->shellHttp( $initial );
+                break;
+        }
+    }
+
+    public function shellCli( $input = '' ) {
+        $hist = $_ENV['HOME'] . '/.pdo_history';
+        
+        if ( file_exists( $hist ) ) {
+            readline_read_history( $hist );
+        }
+
+        $prompt = 'mysql-> ';
+        
+        if ( $input ) {
+            echo "Passed argument: $input\n";
+            $input = '';
+        }
+
+        while ( $line = readline( $prompt ) ) {
+            if ( $input ) {
+                $prompt = '-> ';
+            }
+    
+            $input .= $line;
+    
+            if ( substr( $line, -1 ) == ';' ) {
+                echo "Rewriting $input\n";
+
+                $statement = $this->prepare( $input );
+    
+                if ( $statement instanceof madPDOStatement ) {
+                    echo "Will proxy:\n";
+                    echo $statement->queryString;
+                    echo "\n";
+
+                    echo shell_exec( sprintf( 
+                        'mysql -e \'%s\' %s',
+                        str_replace( "'", '\\\'', $statement->queryString ),
+                        $this->dbName
+                    ) );
+                    echo "\n";
+
+                } else {
+                    foreach( $statement->objects as $object ) {
+                        echo "Will execute:\n";
+                        echo $object->queryString . "\n";
+                    }
+                    $statement->execute(  );
+                }
+
+                $prompt = 'mysql-> ';
+                readline_add_history( $input );
+                $input = '';
+            }
+        }
+
+        readline_write_history( $hist );
+    }
+
+    public function shellHttp( $initial = '',$output = true ) {
+        if ( isset( $_POST['mad_query'] ) ) {
+            $query = $_POST['mad_query'];
+
+            foreach( $this->query( $query, PDO::FETCH_ASSOC ) as $row ) {
+                if ( !isset( $table ) ) {
+                    $table = array();
+                    $table[] = sprintf(
+                        '<tr><th>%s</th></tr>' ,
+                        implode( '</th><th>', array_keys( $row ) )
+                    );
+                }
+
+                $table[] = sprintf( 
+                    '<tr><td>%s</td></tr>',
+                    implode( '</td><td>', array_values( $row ) )
+                );
+            }
+        }
+
+        $html = array(  );
+        
+        if ( isset( $query ) ) {
+            $html[] = sprintf( 
+                '<pre clas[] ="sh_sql">%s</pre>',
+                $query
+            );
+            $html[] = '<script type="text/javascript" src="http://shjs.sourceforge.net/sh_main.min.js" />';
+            $html[] = '<script type="text/javascript" src="http://shjs.sourceforge.net/sh_sql.min.js" />';
+            $html[] = '<script type="text/javascript">sh_highlightDocument();</script>';
+        }
+
+        $html[] = '<form action="" method="post">';
+        $html[] = sprintf(
+            '<textarea name="mad_query">%s</textarea>',
+            isset( $query ) ? $query : ''
+        );
+        $html[] = '</form>';
+
+        $html[] = sprintf( 
+            '<table>%s</table>',
+            implode( "\n\t", $table )
+        );
+
+        $html = implode( "\n", $html );
+    
+        if ( $output ) {
+            echo $html;
+        }
+
+        return $html;
+    }
+}
 class madPDOStatement extends PDOStatement {
     public $createTable = null;
     public $createColumn = null;
     public $insertsSchemalessRow = false;
     public $insertAttribute = false;
+
+    public function execute( $input_parameters = array(  ) ) {
+        try {
+            return parent::execute( $input_parameters );
+        } catch( PDOException $e ) {
+            throw new madPDOException( $e, $this );
+        }
+    }
 }
 
 class madPDOStatementWrapper {
@@ -374,26 +587,17 @@ class madPDOStatementWrapper {
     }
 }
 
-
-function mysql_shell(  ) {
-    $prompt = 'mysql-> ';
-    $query = '';
-
-    while ( $line = readline( $prompt ) ) {
-        if ( $query ) {
-            $prompt = '->';
-        }
-
-        $query .= $line;
-
-        if ( substr( $line, -1 ) == ';' ) {
-            echo shell_exec( sprintf( 
-                'echo "%s" | mysql testdb',
-                str_replace( '"', '\"', $query )
-            ) );
-            $prompt = 'mysql->';
-            $query = '';
-        }
+class madPDOException extends PDOException {
+    public $s = null;
+    public $e = null;
+    public function __construct( PDOException $e, PDOStatement $s ) {
+        $this->e = $e;
+        $this->s = $s;
+        parent::__construct( sprintf(  
+            "Query failure: %s Query: ",
+            $this->e->getMessage(  ),
+            $this->s->queryString
+        ) );
     }
 }
 

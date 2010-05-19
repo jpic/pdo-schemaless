@@ -1,0 +1,12 @@
+INSERT INTO `authors` SET `id` = "1", `email` = "", `name` = "james";
+INSERT INTO `authors` SET `id` = "2", `email` = "", `name` = "christophe";
+INSERT INTO `recipes` SET `id` = "1", `author` = "1", `title` = "mojito";
+INSERT INTO `recipes` SET `id` = "2", `author` = "2", `title` = "tipunch";
+INSERT INTO `recipes` SET `id` = "3", `author` = "1", `title` = "pizza";
+INSERT INTO `recipes` SET `id` = "4", `author` = "2", `title` = "quiche";
+INSERT INTO `categories` SET `id` = "1", `title` = "drinks";
+INSERT INTO `categories` SET `id` = "2", `title` = "middle";
+INSERT INTO `recipe_categories` SET `id` = "1", `recipe` = "1", `category` = "1";
+INSERT INTO `recipe_categories` SET `id` = "2", `recipe` = "2", `category` = "1";
+INSERT INTO `recipe_categories` SET `id` = "3", `recipe` = "3", `category` = "2";
+INSERT INTO `recipe_categories` SET `id` = "4", `recipe` = "4", `category` = "2";

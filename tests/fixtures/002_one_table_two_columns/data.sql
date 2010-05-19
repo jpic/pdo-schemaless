@@ -1,0 +1,1 @@
+INSERT INTO `authors` SET `id` = "1", `name` = "james", `email` = "foo@example.com";
