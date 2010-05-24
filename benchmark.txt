@@ -1,0 +1,196 @@
+This is the output of test.php
+======
+
+Test: /001_one_table_one_column
+Testing:
+select name from authors
+Rewrote to:
+select authors_name.value AS name from authors LEFT OUTER JOIN authors_name ON authors_name.id = authors.id
+
+Row count        1000
+Vanilla time     0.555457115173
+Rewritten time   0.5943608284
+Performance loss for 1000 iterations: 0.0389037132263 (7.00%)
+Average performance loss for 1 iterations: 0.00003890
+
+Test: /002_one_table_two_columns
+Testing:
+select * from authors
+Rewrote to:
+select `authors`.`id`, `authors_name`.value AS `name`, `authors_email`.value AS `email` from authors LEFT OUTER JOIN authors_name ON authors_name.id = authors.id LEFT OUTER JOIN authors_email ON authors_email.id = authors.id
+
+Row count        1000
+Vanilla time     0.654963970184
+Rewritten time   0.686464071274
+Performance loss for 1000 iterations: 0.0315001010895 (4.81%)
+Average performance loss for 1 iterations: 0.00003150
+
+Test: /003_fk
+Testing:
+select 
+    authors.*
+    , recipes.* 
+from
+    recipes
+    left join authors on recipes.author = authors.id
+
+Rewrote to:
+select `authors`.`id`, `authors_email`.value AS `email`, `authors_name`.value AS `name` , `recipes`.`id`, `recipes_title`.value AS `title`, `recipes_author`.value AS `author` from recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id LEFT OUTER JOIN recipes_author ON recipes_author.id = recipes.id left join authors LEFT OUTER JOIN authors_email ON authors_email.id = authors.id LEFT OUTER JOIN authors_name ON authors_name.id = authors.id on recipes_author.value = authors.id
+
+
+Row count        2000
+Vanilla time     1.5122358799
+Rewritten time   1.48611783981
+Performance loss for 1000 iterations: -0.0261180400848 (-1.73%)
+Average performance loss for 1 iterations: -0.00002612
+
+Testing:
+
+
+select 
+    authors.*
+    , recipes.* 
+from
+    recipes
+    left join authors on recipes.author = authors.id
+where
+    authors.name = 'james'
+
+Rewrote to:
+select `authors`.`id`, `authors_email`.value AS `email`, `authors_name`.value AS `name` , `recipes`.`id`, `recipes_title`.value AS `title`, `recipes_author`.value AS `author` from recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id LEFT OUTER JOIN recipes_author ON recipes_author.id = recipes.id left join authors LEFT OUTER JOIN authors_email ON authors_email.id = authors.id LEFT OUTER JOIN authors_name ON authors_name.id = authors.id on recipes_author.value = authors.id
+where authors_name.value = 'james'
+
+
+Row count        1000
+Vanilla time     0.732940912247
+Rewritten time   0.769253015518
+Performance loss for 1000 iterations: 0.0363121032715 (4.95%)
+Average performance loss for 1 iterations: 0.00003631
+
+Testing:
+
+
+select 
+    authors.*
+    , recipes.* 
+from
+    recipes
+    left join authors on recipes.author = authors.id
+where
+    authors.name like 'chri%'
+
+Rewrote to:
+select `authors`.`id`, `authors_email`.value AS `email`, `authors_name`.value AS `name` , `recipes`.`id`, `recipes_title`.value AS `title`, `recipes_author`.value AS `author` from recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id LEFT OUTER JOIN recipes_author ON recipes_author.id = recipes.id left join authors LEFT OUTER JOIN authors_email ON authors_email.id = authors.id LEFT OUTER JOIN authors_name ON authors_name.id = authors.id on recipes_author.value = authors.id
+where authors_name.value like 'chri%'
+
+
+Row count        1000
+Vanilla time     0.740325212479
+Rewritten time   0.782160043716
+Performance loss for 1000 iterations: 0.0418348312378 (5.65%)
+Average performance loss for 1 iterations: 0.00004183
+
+Test: /004_m2m
+Testing:
+select 
+    recipes.title
+    , authors.name
+from 
+    recipes
+    left join authors on authors.id = recipes.author
+where
+    authors.name like "james"
+
+Rewrote to:
+select recipes_title.value AS title , authors_name.value AS name
+from recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id LEFT OUTER JOIN recipes_author ON recipes_author.id = recipes.id left join authors LEFT OUTER JOIN authors_name ON authors_name.id = authors.id on authors.id = recipes_author.value
+where authors_name.value like "james"
+
+
+Row count        2000
+Vanilla time     1.20263695717
+Rewritten time   1.30808401108
+Performance loss for 1000 iterations: 0.105447053909 (8.77%)
+Average performance loss for 1 iterations: 0.00010545
+
+Testing:
+
+select 
+    recipes.title
+    , recipe_categories.recipe
+    , recipe_categories.category
+from 
+    recipe_categories
+    left join recipes on recipe_categories.recipe = recipes.id
+
+Rewrote to:
+select recipes_title.value AS title , recipe_categories_recipe.value AS recipe , recipe_categories_category.value AS category
+from recipe_categories LEFT OUTER JOIN recipe_categories_recipe ON recipe_categories_recipe.id = recipe_categories.id LEFT OUTER JOIN recipe_categories_category ON recipe_categories_category.id = recipe_categories.id left join recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id on recipe_categories_recipe.value = recipes.id
+
+
+Row count        4000
+Vanilla time     2.45741987228
+Rewritten time   2.59660100937
+Performance loss for 1000 iterations: 0.139181137085 (5.66%)
+Average performance loss for 1 iterations: 0.00013918
+
+Testing:
+
+select 
+    recipes.title as recipe_title
+    , categories.title as category_title
+    , recipe_categories.recipe
+    , recipe_categories.category
+from 
+    recipe_categories
+    left join recipes on recipe_categories.recipe = recipes.id
+    left join categories on recipe_categories.category = categories.id
+
+Rewrote to:
+select recipes_title.value AS recipe_title   , categories_title.value AS category_title   , recipe_categories_recipe.value AS recipe , recipe_categories_category.value AS category
+from recipe_categories LEFT OUTER JOIN recipe_categories_recipe ON recipe_categories_recipe.id = recipe_categories.id LEFT OUTER JOIN recipe_categories_category ON recipe_categories_category.id = recipe_categories.id left join recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id on recipe_categories_recipe.value = recipes.id left join categories LEFT OUTER JOIN categories_title ON categories_title.id = categories.id on recipe_categories_category.value = categories.id
+
+
+Row count        4000
+Vanilla time     2.58349704742
+Rewritten time   2.85160899162
+Performance loss for 1000 iterations: 0.268111944199 (10.38%)
+Average performance loss for 1 iterations: 0.00026811
+
+Testing:
+
+select 
+    recipes.title as recipe_title
+    , categories.title as category_title
+    , authors.name as author_name
+    , recipe_categories.recipe
+    , recipe_categories.category
+from 
+    recipe_categories
+    left join recipes on recipe_categories.recipe = recipes.id
+    left join categories on recipe_categories.category = categories.id
+    left join authors on recipes.author = authors.id
+where
+    categories.title like "dri%"
+group by recipe_categories.id
+
+Rewrote to:
+select recipes_title.value AS recipe_title   , categories_title.value AS category_title   , authors_name.value AS author_name   , recipe_categories_recipe.value AS recipe , recipe_categories_category.value AS category
+from recipe_categories LEFT OUTER JOIN recipe_categories_recipe ON recipe_categories_recipe.id = recipe_categories.id LEFT OUTER JOIN recipe_categories_category ON recipe_categories_category.id = recipe_categories.id left join recipes LEFT OUTER JOIN recipes_title ON recipes_title.id = recipes.id LEFT OUTER JOIN recipes_author ON recipes_author.id = recipes.id on recipe_categories_recipe.value = recipes.id left join categories LEFT OUTER JOIN categories_title ON categories_title.id = categories.id on recipe_categories_category.value = categories.id left join authors LEFT OUTER JOIN authors_name ON authors_name.id = authors.id on recipes_author.value = authors.id
+where categories_title.value like "dri%"
+group by recipe_categories.id
+
+
+Row count        2000
+Vanilla time     1.42360806465
+Rewritten time   1.52961993217
+Performance loss for 1000 iterations: 0.106011867523 (7.45%)
+Average performance loss for 1 iterations: 0.00010601
+
+
+..
+   Local Variables:
+   mode: rst
+   fill-column: 79
+   End: 
+   vim: et syn=rst tw=79
